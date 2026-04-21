@@ -33,6 +33,7 @@
     "gh-pages": "^6.3.0",
     "pages": "^0.0.16",
     "tailwindcss": "^4.1.14",
+    "terser": "^5.46.1",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

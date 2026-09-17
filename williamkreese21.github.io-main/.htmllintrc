@@ -1,0 +1,10 @@
+{
+  "attr-name-style": false,
+  "attr-no-dup": true,
+  "attr-quote-style": "double",
+  "doctype-first": true,
+  "doctype-html5": true,
+  "indent-style": "spaces",
+  "indent-width": 2,
+  "tag-name-lowercase": true
+}

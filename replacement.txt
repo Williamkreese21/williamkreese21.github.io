@@ -1,0 +1,207 @@
+function TabFlasher() {
+  const [terminalLines, setTerminalLines] = React.useState<string[]>([
+    '// Universal Web Flasher Console Initialized',
+    '// Supports ESP8266, ESP32, S2, S3, C3, C6, etc.',
+    'Waiting for device connection...'
+  ]);
+  const [isConnected, setIsConnected] = React.useState(false);
+  const [isFlashing, setIsFlashing] = React.useState(false);
+  const [esploader, setEsploader] = React.useState<any>(null);
+  const [chipName, setChipName] = React.useState<string>('');
+  const [fileObj, setFileObj] = React.useState<File | null>(null);
+  const [progress, setProgress] = React.useState(0);
+  const [address, setAddress] = React.useState('0x1000');
+  
+  const terminalRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+  }, [terminalLines]);
+
+  const addLog = (msg: string) => {
+    setTerminalLines(prev => [...prev, msg]);
+  };
+
+  const handleConnect = async () => {
+    if (!('serial' in navigator)) {
+      addLog('Error: Web Serial API not supported in this browser.');
+      return;
+    }
+
+    try {
+      const port = await (navigator as any).serial.requestPort();
+      const { ESPLoader, Transport } = await import('esptool-js');
+      
+      const transport = new Transport(port, true);
+      const terminal = {
+        clean() { setTerminalLines([]); },
+        writeLine(data: string) { addLog(data); },
+        write(data: string) { addLog(data); },
+      };
+
+      const loaderOptions = {
+        transport,
+        baudrate: 115200,
+        terminal,
+        debugLogging: false,
+      };
+
+      const loader = new ESPLoader(loaderOptions);
+      setEsploader(loader);
+      
+      addLog('Connecting to device...');
+      const chip = await loader.main();
+      setChipName(chip);
+      setIsConnected(true);
+      addLog(`Connected successfully to: ${chip}`);
+    } catch (e: any) {
+      addLog(`Connection error: ${e.message}`);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFileObj(e.target.files[0]);
+      addLog(`Selected file: ${e.target.files[0].name}`);
+    }
+  };
+
+  const handleFlash = async () => {
+    if (!esploader || !fileObj) return;
+
+    try {
+      setIsFlashing(true);
+      setProgress(0);
+      addLog('Reading file...');
+      const arrayBuffer = await fileObj.arrayBuffer();
+      const firmwareData = new Uint8Array(arrayBuffer);
+      let firmwareAddress = parseInt(address, 16);
+      if (isNaN(firmwareAddress)) firmwareAddress = 0x1000;
+
+      const flashOptions = {
+        fileArray: [{ data: firmwareData, address: firmwareAddress }],
+        flashMode: 'keep' as any,
+        flashFreq: 'keep' as any,
+        flashSize: 'keep' as any,
+        eraseAll: false,
+        compress: true,
+        reportProgress: (fileIndex: number, written: number, total: number) => {
+          const percent = (written / total) * 100;
+          setProgress(Math.round(percent));
+        },
+      };
+
+      addLog(`Starting flash at address 0x${firmwareAddress.toString(16)}...`);
+      await esploader.writeFlash(flashOptions);
+      addLog('Flashing completed successfully!');
+      
+      addLog('Resetting device...');
+      await esploader.after("hard_reset");
+      addLog('Done.');
+    } catch (e: any) {
+      addLog(`Flash error: ${e.message}`);
+    } finally {
+      setIsFlashing(false);
+    }
+  };
+
+  return (
+    <div className="w-full animate-in fade-in duration-500">
+      <div className="bg-[#0a110e] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row h-[600px]">
+        {/* Left Column: Settings */}
+        <div className="w-full md:w-1/3 p-6 flex flex-col gap-6 border-b md:border-b-0 md:border-r border-white/10 bg-[#060b09] overflow-y-auto">
+          <div>
+            <h3 className="text-xl font-bold text-white mb-2 font-mono flex items-center gap-2">
+              <Zap size={20} className="text-brand" /> Web Flasher
+            </h3>
+            <p className="text-white/60 text-sm">Flash compiled binaries directly to your ESP board via Web Serial.</p>
+          </div>
+
+          <div className="flex flex-col gap-4 flex-1">
+            {!isConnected ? (
+              <button 
+                onClick={handleConnect}
+                className="w-full py-4 bg-brand text-dark font-bold tracking-widest uppercase rounded-xl hover:bg-brand/80 hover:shadow-[0_0_20px_rgba(94,210,156,0.4)] transition-all flex items-center justify-center gap-2"
+              >
+                Connect Device
+              </button>
+            ) : (
+              <div className="p-4 rounded-xl bg-brand/10 border border-brand/30 text-brand text-sm font-mono flex items-center gap-2 break-all">
+                <div className="w-2 h-2 rounded-full bg-brand animate-pulse shrink-0" />
+                <span>Connected: {chipName}</span>
+              </div>
+            )}
+
+            <div className={`space-y-2 ${!isConnected ? 'opacity-50 pointer-events-none' : ''}`}>
+              <label className="text-[10px] uppercase font-mono tracking-widest text-white/50 ml-1">Flash Address</label>
+              <input 
+                type="text" 
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                className="w-full bg-[#0a110e] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-brand/50 text-sm font-mono"
+                placeholder="0x1000"
+              />
+            </div>
+
+            <div className={`space-y-2 ${!isConnected ? 'opacity-50 pointer-events-none' : ''}`}>
+              <label className="text-[10px] uppercase font-mono tracking-widest text-white/50 ml-1">Firmware (.bin)</label>
+              <div className="relative group cursor-pointer">
+                <input 
+                  type="file" 
+                  accept=".bin" 
+                  onChange={handleFileChange}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                />
+                <div className="w-full bg-[#0a110e] border border-dashed border-white/20 rounded-xl px-4 py-6 flex flex-col items-center justify-center gap-2 group-hover:border-brand/50 transition-colors">
+                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-brand/10 transition-colors">
+                    <ExternalLink size={20} className="text-white/50 group-hover:text-brand transition-colors" />
+                  </div>
+                  <span className="text-sm text-white/60 font-mono text-center px-2">
+                    {fileObj ? fileObj.name : 'Select .bin file'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-auto pt-4">
+              <button 
+                onClick={handleFlash}
+                disabled={!isConnected || !fileObj || isFlashing}
+                className="w-full py-4 rounded-xl font-bold font-mono tracking-wider transition-all duration-300 relative overflow-hidden group bg-white text-black hover:bg-brand hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
+                <span className="relative z-10 flex items-center justify-center gap-2">
+                   {isFlashing ? `Flashing... ${progress}%` : 'Flash Firmware'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Console */}
+        <div className="w-full md:w-2/3 flex flex-col bg-[#060b09] relative border-t md:border-t-0 border-white/10">
+          <div className="absolute top-0 inset-x-0 h-12 bg-gradient-to-b from-[#060b09] to-transparent z-10 pointer-events-none" />
+          <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center shrink-0">
+             <div className="flex items-center gap-2">
+               <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-brand shadow-[0_0_8px_rgba(94,210,156,0.8)]' : 'bg-red-500/50'} animate-pulse`} />
+               <span className="text-[10px] uppercase font-mono tracking-widest text-white/50">Serial Output</span>
+             </div>
+             <button onClick={() => setTerminalLines([])} className="text-[10px] uppercase font-mono tracking-widest text-white/40 hover:text-white transition-colors">Clear</button>
+          </div>
+          <div ref={terminalRef} className="flex-1 p-6 font-mono text-[13px] text-brand/80 overflow-y-auto leading-relaxed custom-scrollbar whitespace-pre-wrap break-all pb-12">
+            {terminalLines.map((line, i) => (
+              <div key={i}>{line.startsWith('//') ? <span className="text-white/30 italic">{line}</span> : line}</div>
+            ))}
+            {isFlashing && (
+              <div className="mt-4 w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                <div className="bg-brand h-full transition-all duration-300" style={{ width: `${progress}%` }} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

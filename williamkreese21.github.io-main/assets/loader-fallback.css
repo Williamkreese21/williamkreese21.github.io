@@ -1,0 +1,10 @@
+@keyframes dismiss-loader {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+[class~="z-[9999]"] {
+  animation: dismiss-loader 500ms ease 4s forwards;
+}

@@ -5,9 +5,12 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { ArrowRight, Menu, X, Github, Instagram } from 'lucide-react';
+import { ArrowRight, Menu, X, Github, Instagram, Radio } from 'lucide-react';
 import { HashRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import EspBoards from './EspBoards';
+import MyEsp from './MyEsp';
+import RepoDetails from './RepoDetails';
+import License from './License';
 import { HackerLoader } from './Loading';
 
 const systemCode = `// [SYSTEM PROTOCOL INITIALIZED]
@@ -325,10 +328,21 @@ function Layout({ children }: { children: React.ReactNode }) {
           </Link>
 
           {/* Desktop Nav */}
-          <nav className="hidden md:flex items-center gap-8 font-inter text-[16px]">
+          <nav className="hidden md:flex items-center gap-6 font-inter text-[15px]">
             <Link to="/blog" className={`hover:text-brand transition-colors duration-300 uppercase focus:outline-none ${location.pathname === '/blog' ? 'text-brand' : ''}`}>BLOG</Link>
             <Link to="/about" className={`hover:text-brand transition-colors duration-300 uppercase focus:outline-none ${location.pathname === '/about' ? 'text-brand' : ''}`}>ABOUT</Link>
             <Link to="/esp" className={`hover:text-brand transition-colors duration-300 uppercase focus:outline-none ${location.pathname === '/esp' ? 'text-brand' : ''}`}>EsPiFF</Link>
+            <Link 
+              to="/my_esp" 
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-full border transition-all duration-300 uppercase font-mono text-[12px] font-bold tracking-wider ${
+                location.pathname === '/my_esp' 
+                  ? 'bg-brand text-dark border-brand shadow-[0_0_20px_rgba(94,210,156,0.5)]' 
+                  : 'bg-white/5 border-white/20 text-white/90 hover:border-brand/60 hover:text-brand hover:bg-white/10 hover:shadow-[0_0_15px_rgba(94,210,156,0.2)]'
+              }`}
+            >
+              <Radio size={13} className={location.pathname === '/my_esp' ? 'text-dark animate-pulse' : 'text-brand animate-pulse'} />
+              <span>MY ESP</span>
+            </Link>
             <a 
               href="https://github.com/williamkreese21" 
               target="_blank" 
@@ -356,6 +370,18 @@ function Layout({ children }: { children: React.ReactNode }) {
           <Link to="/blog" onClick={() => setIsMobileMenuOpen(false)} className={`hover:text-brand transition-colors duration-300 uppercase focus:outline-none text-2xl ${location.pathname === '/blog' ? 'text-brand' : ''}`}>BLOG</Link>
           <Link to="/about" onClick={() => setIsMobileMenuOpen(false)} className={`hover:text-brand transition-colors duration-300 uppercase focus:outline-none text-2xl ${location.pathname === '/about' ? 'text-brand' : ''}`}>ABOUT</Link>
           <Link to="/esp" onClick={() => setIsMobileMenuOpen(false)} className={`hover:text-brand transition-colors duration-300 uppercase focus:outline-none text-2xl ${location.pathname === '/esp' ? 'text-brand' : ''}`}>EsPiFF</Link>
+          <Link 
+            to="/my_esp" 
+            onClick={() => setIsMobileMenuOpen(false)} 
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-full border uppercase font-mono text-xl font-bold tracking-wider transition-all duration-300 ${
+              location.pathname === '/my_esp'
+                ? 'bg-brand text-dark border-brand shadow-[0_0_20px_rgba(94,210,156,0.4)]'
+                : 'bg-white/5 border-white/20 text-white hover:text-brand hover:border-brand'
+            }`}
+          >
+            <Radio size={20} className="text-brand animate-pulse" />
+            MY ESP
+          </Link>
           <a 
             href="https://github.com/williamkreese21" 
             target="_blank" 
@@ -375,11 +401,11 @@ function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Footer Powered By */}
-      <footer className="w-full py-8 text-center bg-dark/20 backdrop-blur-md border-t border-white/5 relative z-20 mt-auto overflow-hidden group">
+      <footer className="w-full py-8 text-center bg-dark/20 backdrop-blur-md border-t border-white/5 relative z-20 mt-auto overflow-hidden group flex flex-col items-center justify-center gap-3">
         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-brand/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-1000 blur-xl pointer-events-none" />
-        <span className="font-mono text-[10px] md:text-[12px] tracking-[0.3em] uppercase text-white/40 group-hover:text-brand/80 transition-colors duration-500">
+        <Link to="/license" className="font-mono text-[10px] md:text-[12px] tracking-[0.3em] uppercase text-white/40 group-hover:text-brand/80 transition-colors duration-500 relative z-10 cursor-pointer">
           POWERED BY <span className="text-white/60 group-hover:text-white transition-colors duration-500 font-bold ml-1">WILLIAM KREESE</span>
-        </span>
+        </Link>
       </footer>
     </div>
   );
@@ -405,6 +431,9 @@ export default function App() {
             <Route path="/about" element={<About />} />
             <Route path="/blog" element={<Blog />} />
             <Route path="/esp" element={<EspBoards />} />
+            <Route path="/my_esp" element={<MyEsp />} />
+            <Route path="/repo/:owner/:repo" element={<RepoDetails />} />
+            <Route path="/license" element={<License />} />
           </Routes>
         </Layout>
       </HashRouter>

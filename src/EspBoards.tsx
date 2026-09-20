@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, ExternalLink, Download, Cpu, Info, Zap, Github, ArrowRight } from 'lucide-react';
+import { X, ExternalLink, Download, Cpu, Info, Zap, Github, ArrowRight, BookOpen, Star, Trash2, AlertTriangle, Radio } from 'lucide-react';
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 
 export default function EspBoards() {
@@ -31,7 +32,7 @@ export default function EspBoards() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex flex-wrap justify-center gap-2 mb-8 border-b border-white/10 pb-4">
+        <div className="flex flex-wrap justify-center items-center gap-2 mb-8 border-b border-white/10 pb-4">
           <TabButton 
             active={activeTab === 'firmware'} 
             onClick={() => setActiveTab('firmware')}
@@ -50,6 +51,13 @@ export default function EspBoards() {
             icon={<Zap size={16} />}
             label="ESP Web Flasher"
           />
+          <Link
+            to="/my_esp"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-mono text-[11px] md:text-[12px] tracking-wider uppercase transition-all duration-300 border bg-brand/10 border-brand/40 text-brand hover:bg-brand/20 hover:border-brand shadow-[0_0_15px_rgba(94,210,156,0.15)]"
+          >
+            <Radio size={16} className="animate-pulse" />
+            My ESP (Screen & Remote)
+          </Link>
         </div>
 
         {/* Tab Content */}
@@ -91,7 +99,11 @@ function TabFlasher() {
   ]);
   const [isConnected, setIsConnected] = React.useState(false);
   const [isFlashing, setIsFlashing] = React.useState(false);
+  const [isErasing, setIsErasing] = React.useState(false);
+  const [eraseAllBeforeFlash, setEraseAllBeforeFlash] = React.useState(false);
+  const [confirmErase, setConfirmErase] = React.useState(false);
   const [esploader, setEsploader] = React.useState<any>(null);
+  const [activeTransport, setActiveTransport] = React.useState<any>(null);
   const [chipName, setChipName] = React.useState<string>('');
   const [fileObj, setFileObj] = React.useState<File | null>(null);
   const [progress, setProgress] = React.useState(0);
@@ -105,8 +117,34 @@ function TabFlasher() {
     }
   }, [terminalLines]);
 
+  // Clean up serial port on unmount
+  React.useEffect(() => {
+    return () => {
+      if (activeTransport) {
+        activeTransport.disconnect().catch((err: any) => console.warn('Unmount disconnect error:', err));
+      }
+    };
+  }, [activeTransport]);
+
   const addLog = (msg: string) => {
     setTerminalLines(prev => [...prev, msg]);
+  };
+
+  const handleDisconnect = async () => {
+    try {
+      if (activeTransport) {
+        addLog('Disconnecting from device...');
+        await activeTransport.disconnect();
+      }
+    } catch (e: any) {
+      console.warn("Disconnect error:", e);
+    } finally {
+      setActiveTransport(null);
+      setEsploader(null);
+      setIsConnected(false);
+      setChipName('');
+      addLog('Device disconnected. Serial port released.');
+    }
   };
 
   const handleConnect = async () => {
@@ -120,6 +158,8 @@ function TabFlasher() {
       const { ESPLoader, Transport } = await import('esptool-js');
       
       const transport = new Transport(port, true);
+      setActiveTransport(transport);
+
       const terminal = {
         clean() { setTerminalLines([]); },
         writeLine(data: string) { addLog(data); },
@@ -153,12 +193,38 @@ function TabFlasher() {
     }
   };
 
+  const handleEraseFlash = async () => {
+    if (!esploader || isFlashing || isErasing) return;
+
+    try {
+      setIsErasing(true);
+      setConfirmErase(false);
+      addLog('----------------------------------------');
+      addLog('--- INITIATING STANDALONE FLASH ERASE ---');
+      addLog('Erasing entire flash memory (this may take up to 20-30 seconds)...');
+      await esploader.eraseFlash();
+      addLog('Flash memory completely wiped and erased successfully!');
+      addLog('Resetting device...');
+      await esploader.after("hard_reset");
+      addLog('Done. Device reset and ready.');
+      addLog('----------------------------------------');
+    } catch (e: any) {
+      addLog(`Erase error: ${e.message}`);
+    } finally {
+      setIsErasing(false);
+    }
+  };
+
   const handleFlash = async () => {
-    if (!esploader || !fileObj) return;
+    if (!esploader || !fileObj || isFlashing || isErasing) return;
 
     try {
       setIsFlashing(true);
       setProgress(0);
+      if (eraseAllBeforeFlash) {
+        addLog('Notice: "Erase All Before Flash" is active.');
+        addLog('Erasing full chip flash memory before writing firmware...');
+      }
       addLog('Reading file...');
       const arrayBuffer = await fileObj.arrayBuffer();
       const firmwareData = new Uint8Array(arrayBuffer);
@@ -170,7 +236,7 @@ function TabFlasher() {
         flashMode: 'keep' as any,
         flashFreq: 'keep' as any,
         flashSize: 'keep' as any,
-        eraseAll: false,
+        eraseAll: eraseAllBeforeFlash,
         compress: true,
         reportProgress: (fileIndex: number, written: number, total: number) => {
           const percent = (written / total) * 100;
@@ -194,9 +260,9 @@ function TabFlasher() {
 
   return (
     <div className="w-full animate-in fade-in duration-500">
-      <div className="bg-[#0a110e] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row h-[600px]">
+      <div className="bg-[#0a110e] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row min-h-[640px]">
         {/* Left Column: Settings */}
-        <div className="w-full md:w-1/3 p-6 flex flex-col gap-6 border-b md:border-b-0 md:border-r border-white/10 bg-[#060b09] overflow-y-auto">
+        <div className="w-full md:w-1/3 p-6 flex flex-col gap-5 border-b md:border-b-0 md:border-r border-white/10 bg-[#060b09] overflow-y-auto">
           <div>
             <h3 className="text-xl font-bold text-white mb-2 font-mono flex items-center gap-2">
               <Zap size={20} className="text-brand" /> Web Flasher
@@ -208,14 +274,24 @@ function TabFlasher() {
             {!isConnected ? (
               <button 
                 onClick={handleConnect}
-                className="w-full py-4 bg-brand text-dark font-bold tracking-widest uppercase rounded-xl hover:bg-brand/80 hover:shadow-[0_0_20px_rgba(94,210,156,0.4)] transition-all flex items-center justify-center gap-2"
+                className="w-full py-4 bg-brand text-dark font-bold tracking-widest uppercase rounded-xl hover:bg-brand/80 hover:shadow-[0_0_20px_rgba(94,210,156,0.4)] transition-all flex items-center justify-center gap-2 font-mono"
               >
                 Connect Device
               </button>
             ) : (
-              <div className="p-4 rounded-xl bg-brand/10 border border-brand/30 text-brand text-sm font-mono flex items-center gap-2 break-all">
-                <div className="w-2 h-2 rounded-full bg-brand animate-pulse shrink-0" />
-                <span>Connected: {chipName}</span>
+              <div className="flex flex-col gap-2">
+                <div className="p-4 rounded-xl bg-brand/10 border border-brand/30 text-brand text-sm font-mono flex items-center justify-between gap-2 break-all">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-brand animate-pulse shrink-0" />
+                    <span>Connected: {chipName}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={handleDisconnect}
+                  className="w-full py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 rounded-xl font-mono text-xs uppercase tracking-wider font-bold transition-all flex items-center justify-center gap-2"
+                >
+                  Disconnect Device
+                </button>
               </div>
             )}
 
@@ -239,28 +315,94 @@ function TabFlasher() {
                   onChange={handleFileChange}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
                 />
-                <div className="w-full bg-[#0a110e] border border-dashed border-white/20 rounded-xl px-4 py-6 flex flex-col items-center justify-center gap-2 group-hover:border-brand/50 transition-colors">
-                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-brand/10 transition-colors">
-                    <ExternalLink size={20} className="text-white/50 group-hover:text-brand transition-colors" />
+                <div className="w-full bg-[#0a110e] border border-dashed border-white/20 rounded-xl px-4 py-5 flex flex-col items-center justify-center gap-2 group-hover:border-brand/50 transition-colors">
+                  <div className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-brand/10 transition-colors">
+                    <ExternalLink size={18} className="text-white/50 group-hover:text-brand transition-colors" />
                   </div>
-                  <span className="text-sm text-white/60 font-mono text-center px-2">
+                  <span className="text-xs text-white/60 font-mono text-center px-2 truncate max-w-full">
                     {fileObj ? fileObj.name : 'Select .bin file'}
                   </span>
                 </div>
               </div>
             </div>
 
-            <div className="mt-auto pt-4">
+            {/* Option: Erase All Before Flashing Firmware */}
+            <div className={`${!isConnected ? 'opacity-50 pointer-events-none' : ''}`}>
+              <label className="flex items-start gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/10 hover:border-brand/40 transition-all cursor-pointer group">
+                <input 
+                  type="checkbox" 
+                  checked={eraseAllBeforeFlash}
+                  onChange={(e) => setEraseAllBeforeFlash(e.target.checked)}
+                  disabled={isFlashing || isErasing}
+                  className="mt-0.5 rounded border-white/20 bg-dark text-brand focus:ring-brand accent-brand cursor-pointer"
+                />
+                <div className="flex flex-col select-none">
+                  <span className="text-xs font-mono font-bold text-white group-hover:text-brand transition-colors flex items-center gap-1.5">
+                    <Trash2 size={13} className="text-amber-400" />
+                    Erase All Before Flash
+                  </span>
+                  <span className="text-[10px] text-white/50 font-mono mt-0.5 leading-tight">
+                    Wipes full chip flash memory before writing new firmware payload
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="mt-auto pt-2 flex flex-col gap-2.5">
+              {/* Flash Firmware Button */}
               <button 
                 onClick={handleFlash}
-                disabled={!isConnected || !fileObj || isFlashing}
-                className="w-full py-4 rounded-xl font-bold font-mono tracking-wider transition-all duration-300 relative overflow-hidden group bg-white text-black hover:bg-brand hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!isConnected || !fileObj || isFlashing || isErasing}
+                className="w-full py-3.5 rounded-xl font-bold font-mono tracking-wider transition-all duration-300 relative overflow-hidden group bg-white text-black hover:bg-brand hover:text-black disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(255,255,255,0.05)]"
               >
                 <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
                 <span className="relative z-10 flex items-center justify-center gap-2">
-                   {isFlashing ? `Flashing... ${progress}%` : 'Flash Firmware'}
+                  <Zap size={15} />
+                  {isFlashing ? `Flashing... ${progress}%` : 'Flash Firmware'}
                 </span>
               </button>
+
+              {/* Standalone Erase Entire Flash Button */}
+              {!confirmErase ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmErase(true)}
+                  disabled={!isConnected || isFlashing || isErasing}
+                  className="w-full py-2.5 rounded-xl font-mono text-xs font-bold tracking-wider uppercase transition-all duration-300 flex items-center justify-center gap-2 border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/60 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <Trash2 size={14} />
+                  {isErasing ? 'Erasing Flash...' : 'Erase Entire Flash (Standalone)'}
+                </button>
+              ) : (
+                <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/50 flex flex-col gap-2 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="text-[11px] font-mono text-red-300 font-bold flex items-center gap-1.5">
+                    <AlertTriangle size={14} className="text-red-400 shrink-0" />
+                    Wipe entire chip flash memory?
+                  </div>
+                  <p className="text-[10px] font-mono text-white/60 leading-tight">
+                    This completely wipes all firmware, code, files, and partitions on the chip.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <button
+                      type="button"
+                      onClick={handleEraseFlash}
+                      disabled={isErasing}
+                      className="py-1.5 px-2 bg-red-600 hover:bg-red-500 text-white font-mono text-[11px] font-bold uppercase rounded-lg transition-colors flex items-center justify-center gap-1"
+                    >
+                      {isErasing ? 'Erasing...' : 'Confirm Erase'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmErase(false)}
+                      disabled={isErasing}
+                      className="py-1.5 px-2 bg-white/10 hover:bg-white/20 text-white/80 font-mono text-[11px] uppercase rounded-lg transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -282,6 +424,11 @@ function TabFlasher() {
             {isFlashing && (
               <div className="mt-4 w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
                 <div className="bg-brand h-full transition-all duration-300" style={{ width: `${progress}%` }} />
+              </div>
+            )}
+            {isErasing && (
+              <div className="mt-4 flex items-center gap-2 text-amber-400 text-xs font-mono animate-pulse">
+                <Trash2 size={14} /> Standalone Flash Erase in progress... Please do not disconnect your device.
               </div>
             )}
           </div>
@@ -307,7 +454,24 @@ function TabFirmware() {
   };
 
   const firmwares = [
-    { name: 'ESP32 Tools Pro v2.0', target: 'ESP32', size: '2.1 MB', date: 'May 2026', url: 'https://github.com/pepeangell5/ESP32-TOOLS-PRO-480x320-V2.0/releases/download/v2.0/firmware-merged.bin' },
+    { 
+      name: 'CYBERDECK MINI ESP32',
+      repoPath: 'pepeangell5/CYBERDECK-MINI-ESP32', 
+      target: 'ESP32-S3', 
+      size: '1.9 MB', 
+      date: 'Sep 2026', 
+      url: 'https://raw.githubusercontent.com/pepeangell5/CYBERDECK-MINI-ESP32/main/archivos%20bin/CYBERDECK-MINI-ESP32-firmware-merged.bin',
+      description: 'Firmware for a portable cyberdeck based on ESP32-S3, ST7789 240x320 TFT display, dual nRF24L01 radio, NEO-6M GPS, microSD, encoder, and physical buttons. Built for learning, defensive monitoring, hardware diagnostics, and cybersecurity demonstrations.'
+    },
+    { 
+      name: 'ESP32 Tools Pro v2.0',
+      repoPath: 'pepeangell5/ESP32-TOOLS-PRO-480x320-V2.0', 
+      target: 'ESP32', 
+      size: '2.1 MB', 
+      date: 'May 2026', 
+      url: 'https://github.com/pepeangell5/ESP32-TOOLS-PRO-480x320-V2.0/releases/download/v2.0/firmware-merged.bin',
+      description: 'ESP32-TOOLS-PRO-480x320-V2.0 expands on V1.0 with support for M5Stack IR modules and CC1101. It adds IR capture/replay, saved controls, sub-GHz RF analysis, WiFi/BLE Radar, iPhone Remote, and advanced diagnostics for WiFi, BLE, IR, and RF testing on an ESP32 with a 480x320 TFT display.'
+    },
     { name: 'MicroPython v1.22.0', target: 'ESP32-S3', size: '1.5 MB', date: 'Oct 2023' },
     { name: 'CircuitPython 8.2.7', target: 'ESP32-S3', size: '1.8 MB', date: 'Nov 2023' },
     { name: 'WLED v0.14.0', target: 'ESP32', size: '1.1 MB', date: 'Sep 2023' },
@@ -348,15 +512,29 @@ function TabFirmware() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        {filteredFirmwares.map((fw, i) => (
-          <div key={i} className="flex flex-col items-center md:items-start justify-center md:justify-between p-5 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-colors aspect-square md:aspect-[4/3] text-center md:text-left group">
+        {filteredFirmwares.map((fw: any, i) => (
+          <div key={i} className="flex flex-col items-center md:items-start justify-between p-5 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-colors h-full min-h-[200px] text-center md:text-left group">
             <div className="flex flex-col items-center md:items-start w-full">
               <h4 className="text-white font-bold text-sm md:text-base leading-tight mb-2 md:mb-1">{fw.name}</h4>
-              <div className="flex flex-col md:flex-row md:flex-wrap items-center md:items-start gap-1 md:gap-2 text-[10px] md:text-[11px] font-mono text-white/50 mt-1 uppercase w-full">
+              <div className="flex flex-col md:flex-row md:flex-wrap items-center md:items-start gap-1 md:gap-2 text-[10px] md:text-[11px] font-mono text-white/50 mt-1 mb-3 uppercase w-full">
                 <span className="text-brand bg-brand/10 px-2 py-0.5 rounded-sm">{fw.target}</span>
                 <span className="bg-black/30 px-2 py-0.5 rounded-sm">{fw.size}</span>
                 <span className="bg-black/30 px-2 py-0.5 rounded-sm hidden md:inline">{fw.date}</span>
               </div>
+              
+              {fw.description && (
+                <div className="mt-2 text-left w-full">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-white font-bold text-xs block">About</span>
+                    {fw.repoPath && (
+                      <Link to={`/repo/${fw.repoPath}`} className="text-brand hover:text-white text-[10px] flex items-center gap-1 font-mono uppercase transition-colors bg-white/5 px-2 py-0.5 rounded border border-white/10 hover:border-brand/50">
+                        Read Full <ArrowRight size={10} />
+                      </Link>
+                    )}
+                  </div>
+                  <p className="text-white/70 text-[11px] leading-relaxed line-clamp-4">{fw.description}</p>
+                </div>
+              )}
             </div>
             <button 
               onClick={() => handleDownload(i, (fw as any).url)}

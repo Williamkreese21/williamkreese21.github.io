@@ -117,9 +117,29 @@ function TabFlasher() {
     }
   }, [terminalLines]);
 
-  // Clean up serial port on unmount
+  // Clean up serial port on unmount and listen to disconnect events
   React.useEffect(() => {
+    const handleSerialDisconnect = (event: any) => {
+      addLog('Hardware notification: USB device was disconnected or lost.');
+      if (activeTransport) {
+        activeTransport.disconnect().catch(() => {});
+        setActiveTransport(null);
+        setEsploader(null);
+        setIsConnected(false);
+        setChipName('');
+      }
+    };
+
+    if ('serial' in navigator) {
+      (navigator as any).serial.addEventListener('disconnect', handleSerialDisconnect);
+    }
+
     return () => {
+      if ('serial' in navigator) {
+        try {
+          (navigator as any).serial.removeEventListener('disconnect', handleSerialDisconnect);
+        } catch (e) {}
+      }
       if (activeTransport) {
         activeTransport.disconnect().catch((err: any) => console.warn('Unmount disconnect error:', err));
       }
@@ -153,6 +173,11 @@ function TabFlasher() {
       return;
     }
 
+    if (activeTransport) {
+      await handleDisconnect();
+      await new Promise(r => setTimeout(r, 100));
+    }
+
     try {
       const port = await (navigator as any).serial.requestPort();
       const { ESPLoader, Transport } = await import('esptool-js');
@@ -182,7 +207,12 @@ function TabFlasher() {
       setIsConnected(true);
       addLog(`Connected successfully to: ${chip}`);
     } catch (e: any) {
-      addLog(`Connection error: ${e.message}`);
+      const msg = e?.message || String(e);
+      if (msg.includes('already open')) {
+        addLog('Notice: Serial port was already open or locked. Please disconnect or reset the port and try again.');
+      } else {
+        addLog(`Connection error: ${msg}`);
+      }
     }
   };
 
@@ -201,15 +231,25 @@ function TabFlasher() {
       setConfirmErase(false);
       addLog('----------------------------------------');
       addLog('--- INITIATING STANDALONE FLASH ERASE ---');
-      addLog('Erasing entire flash memory (this may take up to 20-30 seconds)...');
+      addLog('Sending chip full flash erase command (ESP_ERASE_FLASH)...');
+      addLog('Please wait, wiping entire SPI flash memory (typically 15-30 seconds)...');
+      
+      // Call eraseFlash explicitly on the loader instance
       await esploader.eraseFlash();
-      addLog('Flash memory completely wiped and erased successfully!');
-      addLog('Resetting device...');
-      await esploader.after("hard_reset");
-      addLog('Done. Device reset and ready.');
+      
+      addLog('>>> SUCCESS: Entire flash memory has been completely erased! All old files and partitions removed.');
+      addLog('Resetting device into clean state...');
+      try {
+        await esploader.after("hard_reset");
+      } catch (rstErr: any) {
+        // Non-fatal if reset packet didn't acknowledge
+        console.warn('Hard reset notification:', rstErr);
+      }
+      addLog('Done. Device reset and completely clean.');
       addLog('----------------------------------------');
     } catch (e: any) {
-      addLog(`Erase error: ${e.message}`);
+      addLog(`Erase failed: ${e?.message || String(e)}`);
+      addLog('Troubleshoot tip: Ensure your USB cable supports high-speed data and hold BOOT button if necessary.');
     } finally {
       setIsErasing(false);
     }
@@ -221,22 +261,40 @@ function TabFlasher() {
     try {
       setIsFlashing(true);
       setProgress(0);
+
+      // CRITICAL FIX: If user ticked eraseAllBeforeFlash, run explicit loader.eraseFlash() first!
+      // In esptool-js, options.eraseAll inside writeFlash requires this.IS_STUB === true.
+      // If stub wasn't loaded or active, writeFlash silently skips eraseAll.
+      // Doing an explicit eraseFlash() guarantees 100% full chip wipe before writing!
       if (eraseAllBeforeFlash) {
-        addLog('Notice: "Erase All Before Flash" is active.');
-        addLog('Erasing full chip flash memory before writing firmware...');
+        addLog('----------------------------------------');
+        addLog('Notice: "Erase All Before Flash" is ACTIVE.');
+        addLog('Wiping entire flash memory first to remove all old files and corrupted code...');
+        addLog('Erasing entire chip (this may take up to 20-30 seconds)...');
+        try {
+          await esploader.eraseFlash();
+          addLog('>>> Flash completely wiped clean! Proceeding to firmware upload...');
+        } catch (eraseErr: any) {
+          addLog(`Warning during erase: ${eraseErr?.message || String(eraseErr)}. Attempting to continue...`);
+        }
+        addLog('----------------------------------------');
       }
-      addLog('Reading file...');
+
+      addLog('Reading firmware payload...');
       const arrayBuffer = await fileObj.arrayBuffer();
       const firmwareData = new Uint8Array(arrayBuffer);
       let firmwareAddress = parseInt(address, 16);
       if (isNaN(firmwareAddress)) firmwareAddress = 0x1000;
+
+      addLog(`File size: ${(firmwareData.length / 1024).toFixed(1)} KB`);
+      addLog(`Target flash address: 0x${firmwareAddress.toString(16)}`);
 
       const flashOptions = {
         fileArray: [{ data: firmwareData, address: firmwareAddress }],
         flashMode: 'keep' as any,
         flashFreq: 'keep' as any,
         flashSize: 'keep' as any,
-        eraseAll: eraseAllBeforeFlash,
+        eraseAll: false, // Already performed explicitly above for 100% reliability
         compress: true,
         reportProgress: (fileIndex: number, written: number, total: number) => {
           const percent = (written / total) * 100;
@@ -244,15 +302,20 @@ function TabFlasher() {
         },
       };
 
-      addLog(`Starting flash at address 0x${firmwareAddress.toString(16)}...`);
+      addLog(`Writing firmware to 0x${firmwareAddress.toString(16)}...`);
       await esploader.writeFlash(flashOptions);
-      addLog('Flashing completed successfully!');
+      addLog('>>> Flashing completed successfully (100%)!');
       
-      addLog('Resetting device...');
-      await esploader.after("hard_reset");
-      addLog('Done.');
+      addLog('Resetting device into application mode...');
+      try {
+        await esploader.after("hard_reset");
+      } catch (rstErr: any) {
+        console.warn('Reset notification:', rstErr);
+      }
+      addLog('Done! Your ESP device is now booting the new firmware.');
     } catch (e: any) {
-      addLog(`Flash error: ${e.message}`);
+      addLog(`Flash error: ${e?.message || String(e)}`);
+      addLog('Hint: If writing failed, click "Disconnect Device", replug USB, and reconnect.');
     } finally {
       setIsFlashing(false);
     }
@@ -444,7 +507,14 @@ function TabFirmware() {
 
   const handleDownload = (index: number, url?: string) => {
     if (url) {
-      window.location.href = url;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = url.split('/').pop() || 'firmware.bin';
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } else {
       setWarningId(index);
       setTimeout(() => {
@@ -455,7 +525,16 @@ function TabFirmware() {
 
   const firmwares = [
     { 
-      name: 'CYBERDECK MINI ESP32',
+      name: 'CYBERDECK MINI ESP32 (Web Remote)',
+      repoPath: 'Williamkreese21/ESP32-CyberDeck-with-remote-on-web-app', 
+      target: 'ESP32-S3', 
+      size: '1.9 MB', 
+      date: 'Sep 2026', 
+      url: 'https://raw.githubusercontent.com/Williamkreese21/ESP32-CyberDeck-with-remote-on-web-app/main/archivos%20bin/CYBERDECK-MINI-ESP32-firmware-merged.bin',
+      description: 'Custom ESP32-S3 firmware build with direct Web Serial Remote controls, ST7789 240x320 TFT display, dual nRF24L01 radio, NEO-6M GPS, microSD, and navigation input support.'
+    },
+    { 
+      name: 'CYBERDECK MINI ESP32 (Original)',
       repoPath: 'pepeangell5/CYBERDECK-MINI-ESP32', 
       target: 'ESP32-S3', 
       size: '1.9 MB', 

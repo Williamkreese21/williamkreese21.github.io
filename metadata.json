@@ -1,0 +1,6 @@
+{
+  "name": "William Kreese",
+  "description": "William Kreese (EDKR) official web platform focused on web development, design, and software engineering, featuring a liquid glass UI and HLS video background.",
+  "requestFramePermissions": ["serial", "usb"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

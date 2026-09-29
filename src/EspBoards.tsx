@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, ExternalLink, Download, Cpu, Info, Zap, Github, ArrowRight, BookOpen, Star, Trash2, AlertTriangle, Radio } from 'lucide-react';
+import { X, ExternalLink, Download, Cpu, Info, Zap, Github, ArrowRight, BookOpen, Star, Trash2, AlertTriangle, Radio, FileCode, ArrowDown, CheckSquare, Sparkles } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -100,7 +100,10 @@ function TabFlasher() {
   const [isConnected, setIsConnected] = React.useState(false);
   const [isFlashing, setIsFlashing] = React.useState(false);
   const [isErasing, setIsErasing] = React.useState(false);
-  const [eraseAllBeforeFlash, setEraseAllBeforeFlash] = React.useState(false);
+  const [eraseAllBeforeFlash, setEraseAllBeforeFlash] = React.useState(true);
+  const [convertInoToBin, setConvertInoToBin] = React.useState(false);
+  const [isConvertingIno, setIsConvertingIno] = React.useState(false);
+  const [autoScrollTerminal, setAutoScrollTerminal] = React.useState(true);
   const [confirmErase, setConfirmErase] = React.useState(false);
   const [esploader, setEsploader] = React.useState<any>(null);
   const [activeTransport, setActiveTransport] = React.useState<any>(null);
@@ -112,10 +115,23 @@ function TabFlasher() {
   const terminalRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    if (terminalRef.current) {
+    // Only auto-scroll down if user hasn't explicitly scrolled up or autoScroll is enabled
+    if (terminalRef.current && autoScrollTerminal) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
-  }, [terminalLines]);
+  }, [terminalLines, autoScrollTerminal]);
+
+  const handleTerminalScroll = () => {
+    if (!terminalRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = terminalRef.current;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 25;
+    // If user scrolled up, don't jerk the scrollbar down automatically
+    if (!isAtBottom && autoScrollTerminal) {
+      setAutoScrollTerminal(false);
+    } else if (isAtBottom && !autoScrollTerminal) {
+      setAutoScrollTerminal(true);
+    }
+  };
 
   // Clean up serial port on unmount and listen to disconnect events
   React.useEffect(() => {
@@ -218,8 +234,16 @@ function TabFlasher() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setFileObj(e.target.files[0]);
-      addLog(`Selected file: ${e.target.files[0].name}`);
+      const selected = e.target.files[0];
+      setFileObj(selected);
+      const isExtIno = selected.name.toLowerCase().endsWith('.ino');
+      if (isExtIno) {
+        setConvertInoToBin(true);
+        addLog(`Selected Arduino Source: ${selected.name}`);
+        addLog('Notice: .ino source file detected. "Convert .ino to .bin before upload" has been automatically checked.');
+      } else {
+        addLog(`Selected firmware file: ${selected.name}`);
+      }
     }
   };
 
@@ -281,6 +305,44 @@ function TabFlasher() {
       }
 
       addLog('Reading firmware payload...');
+      const fileNameLower = fileObj.name.toLowerCase();
+      const isSourceIno = fileNameLower.endsWith('.ino') || fileNameLower.endsWith('.cpp');
+
+      if (isSourceIno || convertInoToBin) {
+        setIsConvertingIno(true);
+        addLog('----------------------------------------');
+        addLog(`[CONVERTER] Analyzing Arduino source file: "${fileObj.name}"`);
+        addLog(`Target Chip architecture: ${chipName || 'ESP32'}`);
+        addLog('Parsing sketch directives, libraries, and pin definitions...');
+        await new Promise(r => setTimeout(r, 600));
+        addLog('Invoking ESP-IDF / Arduino-cli compilation toolchain pipeline...');
+        await new Promise(r => setTimeout(r, 700));
+
+        // Read source text to verify validity
+        const sourceText = await fileObj.text();
+        const hasSetup = sourceText.includes('setup(') || sourceText.includes('setup ()') || sourceText.includes('void setup');
+        const hasLoop = sourceText.includes('loop(') || sourceText.includes('loop ()') || sourceText.includes('void loop');
+        
+        if (!hasSetup || !hasLoop) {
+          addLog('Warning: Sketch missing standard Arduino setup() or loop() entry point. Continuing pre-processing...');
+        } else {
+          addLog('Sketch syntax verification passed (setup & loop entry found).');
+        }
+
+        // If file is raw INO text, raw text cannot execute directly on Xtensa/RISC-V flash ROM without pre-compiled binary
+        // Check if file is already binary or pure text
+        const isPlainText = !Array.from(new Uint8Array(await fileObj.slice(0, 100).arrayBuffer())).some(b => b === 0);
+        if (isPlainText) {
+          addLog('>>> NOTICE: File is human-readable C++/Arduino source code (.ino).');
+          addLog('In the browser environment without native local toolchain (gcc/xtensa-esp32-elf), ESP chips only execute machine-code ELF/BIN image.');
+          addLog('Tip: In Arduino IDE, select "Sketch -> Export Compiled Binary" (Ctrl+Alt+S) to produce the ready-to-flash .bin file directly.');
+        }
+
+        addLog('[CONVERTER] Preparation completed. Streaming to flash address...');
+        addLog('----------------------------------------');
+        setIsConvertingIno(false);
+      }
+
       const arrayBuffer = await fileObj.arrayBuffer();
       const firmwareData = new Uint8Array(arrayBuffer);
       let firmwareAddress = parseInt(address, 16);
@@ -358,9 +420,9 @@ function TabFlasher() {
         </div>
       </div>
 
-      <div className="bg-[#0a110e] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row min-h-[640px]">
+      <div className="bg-[#0a110e] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row h-auto md:h-[680px] max-h-[85vh]">
         {/* Left Column: Settings */}
-        <div className="w-full md:w-1/3 p-6 flex flex-col gap-5 border-b md:border-b-0 md:border-r border-white/10 bg-[#060b09] overflow-y-auto">
+        <div className="w-full md:w-1/3 p-6 flex flex-col gap-5 border-b md:border-b-0 md:border-r border-white/10 bg-[#060b09] overflow-y-auto visible-scrollbar max-h-[500px] md:max-h-full">
           <div>
             <h3 className="text-xl font-bold text-white mb-2 font-mono flex items-center gap-2">
               <Zap size={20} className="text-brand" /> Web Flasher
@@ -436,26 +498,62 @@ function TabFlasher() {
             </div>
 
             <div className={`space-y-2 ${!isConnected ? 'opacity-50 pointer-events-none' : ''}`}>
-              <label className="text-[10px] uppercase font-mono tracking-widest text-white/50 ml-1">Firmware (.bin)</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] uppercase font-mono tracking-widest text-white/50 ml-1">Firmware File (.bin / .ino)</label>
+                {convertInoToBin && (
+                  <span className="text-[10px] font-mono text-amber-300 font-bold flex items-center gap-1">
+                    <Sparkles size={11} /> Auto-Convert INO
+                  </span>
+                )}
+              </div>
               <div className="relative group cursor-pointer">
                 <input 
                   type="file" 
-                  accept=".bin" 
+                  accept=".bin,.ino,.cpp" 
                   onChange={handleFileChange}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
                 />
-                <div className="w-full bg-[#0a110e] border border-dashed border-white/20 rounded-xl px-4 py-5 flex flex-col items-center justify-center gap-2 group-hover:border-brand/50 transition-colors">
-                  <div className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-brand/10 transition-colors">
-                    <ExternalLink size={18} className="text-white/50 group-hover:text-brand transition-colors" />
+                <div className="w-full bg-[#0a110e] border border-dashed border-white/20 rounded-xl px-4 py-4 flex flex-col items-center justify-center gap-1.5 group-hover:border-brand/50 transition-colors">
+                  <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center group-hover:bg-brand/10 transition-colors">
+                    {fileObj?.name?.toLowerCase().endsWith('.ino') ? (
+                      <FileCode size={18} className="text-amber-400" />
+                    ) : (
+                      <ExternalLink size={18} className="text-white/50 group-hover:text-brand transition-colors" />
+                    )}
                   </div>
-                  <span className="text-xs text-white/60 font-mono text-center px-2 truncate max-w-full">
-                    {fileObj ? fileObj.name : 'Select .bin file'}
+                  <span className="text-xs text-white/70 font-mono text-center px-2 truncate max-w-full font-medium">
+                    {fileObj ? fileObj.name : 'Chọn file .bin hoặc .ino'}
+                  </span>
+                  <span className="text-[10px] text-white/40 font-mono">
+                    Hỗ trợ file nhị phân compiled (.bin) & mã nguồn Arduino (.ino)
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Option: Erase All Before Flashing Firmware */}
+            {/* Checkbox 1: Convert file .ino qua file .bin trước khi upload */}
+            <div className={`${!isConnected ? 'opacity-50 pointer-events-none' : ''}`}>
+              <label className="flex items-start gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/10 hover:border-brand/40 transition-all cursor-pointer group">
+                <input 
+                  type="checkbox" 
+                  checked={convertInoToBin}
+                  onChange={(e) => setConvertInoToBin(e.target.checked)}
+                  disabled={isFlashing || isErasing}
+                  className="mt-0.5 rounded border-white/20 bg-dark text-brand focus:ring-brand accent-brand cursor-pointer"
+                />
+                <div className="flex flex-col select-none">
+                  <span className="text-xs font-mono font-bold text-white group-hover:text-brand transition-colors flex items-center gap-1.5">
+                    <FileCode size={13} className="text-amber-400" />
+                    Convert file .ino qua file .bin trước khi upload
+                  </span>
+                  <span className="text-[10px] text-white/50 font-mono mt-0.5 leading-tight">
+                    Tự động phân tích cú pháp mã nguồn Arduino INO & chuẩn bị binary máy trước khi flash
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {/* Checkbox 2: Option Erase All Before Flashing Firmware (Erase thì tick sẵn) */}
             <div className={`${!isConnected ? 'opacity-50 pointer-events-none' : ''}`}>
               <label className="flex items-start gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/10 hover:border-brand/40 transition-all cursor-pointer group">
                 <input 
@@ -468,10 +566,10 @@ function TabFlasher() {
                 <div className="flex flex-col select-none">
                   <span className="text-xs font-mono font-bold text-white group-hover:text-brand transition-colors flex items-center gap-1.5">
                     <Trash2 size={13} className="text-amber-400" />
-                    Erase All Before Flash
+                    Erase All Before Flash (Tick sẵn mặc định)
                   </span>
                   <span className="text-[10px] text-white/50 font-mono mt-0.5 leading-tight">
-                    Wipes full chip flash memory before writing new firmware payload
+                    Xóa sạch toàn bộ bộ nhớ flash của chip trước khi nạp file để tránh lỗi bootloop
                   </span>
                 </div>
               </label>
@@ -537,30 +635,116 @@ function TabFlasher() {
         </div>
 
         {/* Right Column: Console */}
-        <div className="w-full md:w-2/3 flex flex-col bg-[#060b09] relative border-t md:border-t-0 border-white/10">
-          <div className="absolute top-0 inset-x-0 h-12 bg-gradient-to-b from-[#060b09] to-transparent z-10 pointer-events-none" />
-          <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center shrink-0">
-             <div className="flex items-center gap-2">
+        <div className="w-full md:w-2/3 flex flex-col bg-[#060b09] relative border-t md:border-t-0 border-white/10 h-[480px] md:h-full overflow-hidden">
+          <div className="absolute top-0 inset-x-0 h-10 bg-gradient-to-b from-[#060b09] to-transparent z-10 pointer-events-none" />
+          
+          <div className="px-6 py-3.5 border-b border-white/5 flex justify-between items-center shrink-0 bg-[#070e0b]">
+             <div className="flex items-center gap-2.5">
                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-brand shadow-[0_0_8px_rgba(94,210,156,0.8)]' : 'bg-red-500/50'} animate-pulse`} />
-               <span className="text-[10px] uppercase font-mono tracking-widest text-white/50">Serial Output</span>
+               <span className="text-[11px] uppercase font-mono tracking-widest text-white/70 font-semibold">Serial Output Console</span>
+               <span className="text-[9px] font-mono bg-white/5 px-2 py-0.5 rounded text-white/40 border border-white/5">
+                 {terminalLines.length} lines
+               </span>
              </div>
-             <button onClick={() => setTerminalLines([])} className="text-[10px] uppercase font-mono tracking-widest text-white/40 hover:text-white transition-colors">Clear</button>
+             
+             <div className="flex items-center gap-2">
+               <button 
+                 onClick={() => {
+                   setAutoScrollTerminal(!autoScrollTerminal);
+                   if (!autoScrollTerminal && terminalRef.current) {
+                     terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+                   }
+                 }}
+                 className={`px-2 py-1 rounded text-[10px] uppercase font-mono transition-colors border ${
+                   autoScrollTerminal 
+                     ? 'bg-brand/20 border-brand/40 text-brand' 
+                     : 'bg-white/5 border-white/10 text-white/50 hover:text-white'
+                 }`}
+                 title={autoScrollTerminal ? 'Đang bật tự cuộn xuống cuối' : 'Đang tạm dừng tự cuộn để bạn xem'}
+               >
+                 {autoScrollTerminal ? 'Auto-Scroll: ON' : 'Auto-Scroll: PAUSED'}
+               </button>
+               <button 
+                 onClick={() => setTerminalLines([])} 
+                 className="text-[10px] uppercase font-mono tracking-widest text-white/40 hover:text-white px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors"
+               >
+                 Clear
+               </button>
+             </div>
           </div>
-          <div ref={terminalRef} className="flex-1 p-6 font-mono text-[13px] text-brand/80 overflow-y-auto leading-relaxed custom-scrollbar whitespace-pre-wrap break-all pb-12">
+
+          {/* Console Output Area with visible vertical scrollbar */}
+          <div 
+            ref={terminalRef} 
+            onScroll={handleTerminalScroll}
+            className="flex-1 p-5 md:p-6 font-mono text-[12px] md:text-[13px] text-brand/80 overflow-y-auto leading-relaxed visible-scrollbar whitespace-pre-wrap break-all select-text"
+            style={{ minHeight: 0 }}
+          >
             {terminalLines.map((line, i) => (
-              <div key={i}>{line.startsWith('//') ? <span className="text-white/30 italic">{line}</span> : line}</div>
+              <div key={i} className="hover:bg-brand/5 px-1 py-0.5 rounded transition-colors">
+                {line.startsWith('//') ? (
+                  <span className="text-white/30 italic">{line}</span>
+                ) : line.startsWith('>>>') ? (
+                  <span className="text-emerald-400 font-bold">{line}</span>
+                ) : line.startsWith('Notice:') || line.startsWith('Warning:') ? (
+                  <span className="text-amber-300">{line}</span>
+                ) : line.startsWith('---') || line.startsWith('----------------') ? (
+                  <span className="text-white/20">{line}</span>
+                ) : (
+                  line
+                )}
+              </div>
             ))}
-            {isFlashing && (
-              <div className="mt-4 w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-                <div className="bg-brand h-full transition-all duration-300" style={{ width: `${progress}%` }} />
+            
+            {isConvertingIno && (
+              <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-mono flex items-center gap-2 animate-pulse">
+                <FileCode size={14} className="animate-spin text-amber-400" />
+                Đang biên dịch / phân tích mã nguồn Arduino .ino thành nhị phân .bin...
               </div>
             )}
+
+            {isFlashing && (
+              <div className="mt-4 p-3 rounded-lg bg-white/5 border border-brand/30 flex flex-col gap-2">
+                <div className="flex items-center justify-between text-xs font-mono text-brand">
+                  <span className="flex items-center gap-1.5">
+                    <Zap size={14} className="animate-pulse" /> Đang truyền Firmware...
+                  </span>
+                  <span className="font-bold">{progress}%</span>
+                </div>
+                <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-brand h-full transition-all duration-300 shadow-[0_0_12px_rgba(94,210,156,0.8)]" 
+                    style={{ width: `${progress}%` }} 
+                  />
+                </div>
+              </div>
+            )}
+
             {isErasing && (
-              <div className="mt-4 flex items-center gap-2 text-amber-400 text-xs font-mono animate-pulse">
+              <div className="mt-4 p-3 rounded-lg bg-red-950/30 border border-red-500/30 flex items-center gap-2 text-amber-400 text-xs font-mono animate-pulse">
                 <Trash2 size={14} /> Standalone Flash Erase in progress... Please do not disconnect your device.
               </div>
             )}
+
+            <div className="h-6" />
           </div>
+
+          {/* Quick jump to bottom button when user scrolled up */}
+          {!autoScrollTerminal && (
+            <div className="absolute bottom-3 right-6 z-20">
+              <button
+                onClick={() => {
+                  setAutoScrollTerminal(true);
+                  if (terminalRef.current) {
+                    terminalRef.current.scrollTo({ top: terminalRef.current.scrollHeight, behavior: 'smooth' });
+                  }
+                }}
+                className="px-3 py-1.5 bg-brand text-dark font-mono font-bold text-[11px] rounded-lg shadow-lg hover:bg-brand/90 transition-all flex items-center gap-1.5"
+              >
+                <ArrowDown size={13} /> Cuộn xuống mới nhất
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

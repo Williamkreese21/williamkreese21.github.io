@@ -405,7 +405,7 @@ function TabFlasher() {
         <div className="shrink-0 flex items-center gap-3">
           {/* Custom Web Component from unpkg.com/esp-web-tools */}
           {/* @ts-ignore */}
-          <esp-web-install-button manifest="./manifest.json">
+          <esp-web-install-button manifest="/manifest.json">
             <button 
               slot="activate" 
               className="px-6 py-3.5 bg-brand text-dark font-mono font-bold text-xs uppercase tracking-wider rounded-xl shadow-[0_0_20px_rgba(94,210,156,0.4)] hover:bg-brand/90 hover:scale-[1.02] transition-all flex items-center gap-2 cursor-pointer"
